@@ -1,7 +1,7 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>edu.scu</groupId>
-  <artifactId>SATdownload (Java)</artifactId>
+  <artifactId>SATdownload</artifactId>
   <version>0.0.1-SNAPSHOT</version>
   <name>SATdownload</name>
   <description>Utility to download SAT scrore files from CollegeBoard using their REST interface</description>

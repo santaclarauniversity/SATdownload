@@ -56,7 +56,7 @@ printLicense();
 my $configFile = "SATdownload.conf";
 my $date = strftime("%Y%m%d", localtime);
 my $fileNum = -1;
-my $fileName;
+my $fileName = "";
 my $writeCounterFile = TRUE;
 
 # Set default config
@@ -70,38 +70,104 @@ my %defaultConfig = (
 # Check options
 foreach (@ARGV) {
   if(/^--config=/) { ($configFile = $_) =~ s/--config=//; }
-  elsif(/^--date=/) { ($date = $_) =~ s/--date=//; }
+  elsif(/^--date=/) { ($date = $_) =~ s/--date=|\/|\\//g; }
   elsif(/^--filenum=/) { ($fileNum = $_) =~ s/--filenum=//; }
-  elsif(/^--filename=/) { ($fileName = $_) =~ s/--filename=//; }
-  elsif(/^(-h|--help)$/) { printHelp(); }
+  elsif(/^--filename=/) { ($fileName = $_) =~ s/--filename=//;  }
+  elsif(/^(-h|--help)$/) { printHelp(); exit 0;}
   else { println("Unknown option: $_"); printHelp(); exit 1;}  
 }
 
 # Load Config
 my %config = ParseConfig(-ConfigFile => $configFile, -AutoTrue => TRUE, -MergeDuplicateOptions => TRUE, -DefaultConfig => \%defaultConfig);
 
-# Get current counter
-if($fileNum < 0) {
-  $fileNum = readCounterFile($config{counterFile});
+if($fileNum ne "") {
+  $writeCounterFile = FALSE;
 }
+if($fileName ne "") {
+  $writeCounterFile = FALSE;
+  $config{downloadConsecutiveFiles} = FALSE; 
+}
+
+
+# Get current counter
+#if($fileNum < 0) {
+#  $fileNum = readCounterFile($config{counterFile});
+#}
+
+#if(!$fileName) {
+#  $fileName = $config{orgID}."_".$date."_".pad($fileNum,$config{fileNumPadding}).".".$config{fileExtension};
+#}
 
 if(!$fileName) {
-  $fileName = $config{orgID}."_".$date."_".pad($fileNum,$config{fileNumPadding}).".".$config{fileExtension};
+  $fileName = getNextFileName();
 }
+my $successfulDownload = FALSE;
 
-println("Filename: $fileName");
+do {
+  logMsg("Getting download URL for $fileName");
+  $successfulDownload = downloadFile($fileName);
+  if($successfulDownload && $writeCounterFile) {
+    writeFile($config{counterFile}, $fileNum) or die "Error writing to counter file!";
+  }
+  ++$fileNum;
+  getNextFileName();
+} while($config{downloadConsecutiveFiles} && $successfulDownload);
+logMsg("Done!");
 
 #############
 # Functions #
 #############
+sub downloadFile {
+  my ($fileName) = @_;
+  my $client = REST::Client->new();
+  $client->addHeader('Content-Type', 'application/json');
+  $client->addHeader('Accept', 'application/json');
+  $client->POST($config{scoredwnldUrlRoot}.'/pascoredwnld/file?filename='.$fileName, to_json({username => $config{username}, password => $config{password}}));
+  
+  my $json = JSON->new->allow_nonref;
+  logMsg("Response Code: ".$client->responseCode());
+  if($client->responseCode() == 200) {
+    logMsg("Response Code: ".$client->responseCode());
+    my $responseContent = $json->decode($client->responseContent());
+    logMsg("Response Content: ".$json->pretty->encode($responseContent));
+  
+    return download($responseContent->{"fileUrl"}, $fileName);
+  } else {
+    return FALSE;
+  }
+}
 
-sub readCounterFile {
-  chomp(my $counter = do {
+sub download {
+  my ($fileUrl) = $_[0];
+  my ($fileName) = $_[1];
+  logMsg("File URL: ".$fileUrl);
+  my $client = REST::Client->new();
+  $client->GET($fileUrl);
+  if($client->responseCode() == 200) {
+    logMsg("Saving file to $config{localFilePath}$fileName");
+    return writeFile($config{localFilePath}.$fileName, $client->responseContent());
+  } else {
+    logMsg("Could not download file! Response Code: ".$client->responseCode());
+    logMsg("Content: ".$client->responseContent());
+  }
+  return FALSE;
+}
+
+sub getNextFileName {
+  if($fileNum < 0) {
+    $fileNum = readFile($config{counterFile}) + 1;
+  }
+
+  return $fileName = $config{orgID}."_".$date."_".pad($fileNum,$config{fileNumPadding}).".".$config{fileExtension};
+}
+
+sub readFile {
+  chomp(my $text = do {
     open( my $fh, $_[0] ) or return 0;
     local $/ = undef;
     <$fh>;
   });
-  return $counter;  
+  return $text;  
 }
 
 sub logMsg {
@@ -150,3 +216,11 @@ sub printLicense {
   println("please refer to the License section in the header of this file.\n");
 }
 
+sub writeFile {
+  my ($fileName) = $_[0];
+  my ($fileContent) = $_[1];
+  open (my $fh, '>', $fileName) or die "Could not open file '$fileName' to write: $!";
+  print $fh $fileContent;
+  close $fh;
+  return TRUE;
+}

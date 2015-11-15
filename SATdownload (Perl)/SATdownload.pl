@@ -30,10 +30,41 @@ use 5.012;
 ###############################################################################
 ###############################################################################
 # This script will use the PAScoresDwnld API from CollegeBoard to download SAT
-# score files.
+# score files. This program has been designed so that it can run from the
+# command line in an automated fashion and keep track of the last file number
+# to successfully download.
+#
+# In order to use this, a config file is needed (see SATdownload.conf). At the
+# very least, this file must specify the username, password, orgID, and
+# localFilePath.
+#
+# At run-time, the following options may be set:
+# --config=CONFIGFILE
+#   Specify the path and file name of the config file. Default is
+#   SATdownload.conf.
+# --date=DATE
+#   Specify date of file to download.  Default is today's date.
+#   Recommended format is YYYY/MM/DD.
+#
+# --filenum=NUM
+#   Specify the job number to start searching from.  This is the last
+#   part of the file name.  Default is the next number in the counter
+#   file.
+#
+# --filename=FILENAME
+#   Specify the exact file name to download.
+#
+# -h | --help
+#   Display this help information.
 #
 # Documenation on the PAScoresDwnld API can be found at
 # https://collegereadiness.collegeboard.org/educators/higher-ed/reporting-portal-help#features
+#
+# Exit Codes:
+#  0 - Success
+#  1 - Unknown option
+#  2 - Cannot write file
+#  500 - Internal error
 #
 # Author: Brian Moon (bmoon@scu.edu)
 # Version: 1.1
@@ -56,6 +87,7 @@ printLicense();
 # Initialize global variables and set defaults
 my $configFile = "SATdownload.conf";
 my $date = strftime("%Y%m%d", localtime);
+my $exit_code = 0;
 my $fileNum = "";
 my $fileName = "";
 my $writeCounterFile = TRUE;
@@ -104,7 +136,10 @@ do {
   $successfulDownload = downloadFile($fileName);
   if($successfulDownload && $writeCounterFile) {
   	# Write counter file
-    writeFile($config{counterFile}, $fileNum) or die "Error writing to counter file!";
+    if(!writeFile($config{counterFile}, $fileNum)) {
+    	$exit_code = 2;
+    	die "Error writing to counter file!";
+    }
   }
   ++$fileNum;
   getNextFileName();
@@ -129,6 +164,7 @@ logMsg("Done!");
 sub downloadFile {
   # Verify number of paramters
   if(scalar(@_) != 1) {
+  	$exit_code = 500;
   	die "downloadFile(): Expected one parameter: fileName";
   }
   # Assign local variables
@@ -176,7 +212,8 @@ sub downloadFile {
 #         FALSE is download or saving the file failed
 sub download {
   # Verify number of paramters
-  if(scalar(@_) != 2) { 
+  if(scalar(@_) != 2) {
+  	$exit_code = 500;
   	die "download(): Expected two parameters: fileUrl, fileName.";
   }
   
@@ -226,6 +263,7 @@ sub getNextFileName {
 sub readFile {
   # Verify numberof paramters
   if(scalar(@_) != 1) {
+  	$exit_code = 500;
   	die "readFile(): Expected one parameter: fileName";
   }
   my ($fileName) = $_[0];
@@ -260,6 +298,7 @@ sub logMsg {
 sub pad {
   # Verify number of paramters
   if(scalar(@_) != 2) {
+  	$exit_code = 500;
   	die "pad(): Expected two paramters: str, len";
   }
   my ($str) = $_[0];
@@ -325,6 +364,7 @@ sub printLicense {
 sub writeFile {
   # Verify number of paramters
   if(scalar(@_) != 2) {
+  	$exit_code = 500;
   	die "writeFile(): Expected two parameters: fileName, fileContent";
   }
   my ($fileName) = $_[0];
@@ -337,7 +377,12 @@ sub writeFile {
     return TRUE;
   } else {
   	# Open file to write failed
+  	$exit_code = 3;
   	die "Could not open file '$fileName' to write: $!";
   	return FALSE;
   }
+}
+
+END {
+	$! = $exit_code;
 }

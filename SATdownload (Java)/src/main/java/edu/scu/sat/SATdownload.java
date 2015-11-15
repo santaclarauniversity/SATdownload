@@ -72,7 +72,7 @@ import com.sun.jersey.client.urlconnection.HTTPSProperties;
  * 
  * <p>
  * In order to use this, a config file is needed (see
- * <code>config.properties</code>). At the very least, this file must specify
+ * <code>SATdownload.conf</code>). At the very least, this file must specify
  * the username, password, orgID, and localFilePath.
  * </p>
  * 
@@ -83,7 +83,7 @@ import com.sun.jersey.client.urlconnection.HTTPSProperties;
  * <pre>
  *  --config=CONFIGFILE 
  *    Specify the path and file name of the config file. Default is 
- *    config.properties.
+ *    SATdownload.conf.
  * 
  *  --date=DATE 
  *    Specify date of file to download. Default is today's date.  Recommended
@@ -128,7 +128,7 @@ import com.sun.jersey.client.urlconnection.HTTPSProperties;
  * </ul>
  * 
  * @author Brian Moon (bmoon@scu.edu)
- * @version 1.0
+ * @version 1.1
  * 
  */
 public class SATdownload {
@@ -242,9 +242,9 @@ public class SATdownload {
       }
     }
 
-    // If a configFile has not been specified yet, use config.properties
+    // If a configFile has not been specified yet, use SATdownload.conf
     if (configFile == null)
-      configFile = "config.properties";
+      configFile = "SATdownload.conf";
 
     // Create new SATdownload Object
     SATdownload sat = new SATdownload(configFile);
@@ -332,7 +332,7 @@ public class SATdownload {
         "Usage: SATdownload [--config=CONFIGFILE --date=DATE | --filenum=NUM | --filename=FILENAME]\n\n"
             + "Options:\n" + " --config=CONFIGFILE\n"
             + "   Specify the path and file name of the config file.  Default is\n"
-            + "   config.properties.\n\n" + " --date=DATE\n"
+            + "   SATdownload.conf.\n\n" + " --date=DATE\n"
             + "   Specify date of file to download.  Default is today's date.\n"
             + "   Recommended format is YYYYMMDD.\n\n" + " --filenum=NUM\n"
             + "   Specify the job number to start searching from.  This is the last\n"
@@ -548,7 +548,7 @@ public class SATdownload {
 
     // Set up a hostname verifier that ignores invalid hostnames
     HostnameVerifier hostnameVerifier = new HostnameVerifier() {
-      @Override
+      //@Override
       public boolean verify(String hostname, SSLSession sslSession) {
         return true;
       }
@@ -771,17 +771,17 @@ public class SATdownload {
       sslContext.init(null, new TrustManager[] { new X509TrustManager() {
         X509Certificate[] certificates = null;
 
-        @Override
+        //@Override
         public void checkClientTrusted(X509Certificate[] certs, String authType)// NOPMD
         {
         }
 
-        @Override
+        //@Override
         public void checkServerTrusted(X509Certificate[] certs, String authType)// NOPMD
         {
         }
 
-        @Override
+        //@Override
         public X509Certificate[] getAcceptedIssuers() {
           return certificates;
         }
@@ -848,7 +848,7 @@ public class SATdownload {
    * </ul>
    * <p>
    * For a description of these, please refer to the sample
-   * <code>config.properties</code>.
+   * <code>SATdownload.conf</code>.
    * </p>
    * 
    * @param fileName Full path to the configuration file

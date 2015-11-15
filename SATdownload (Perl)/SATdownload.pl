@@ -36,31 +36,33 @@ use 5.012;
 # https://collegereadiness.collegeboard.org/educators/higher-ed/reporting-portal-help#features
 #
 # Author: Brian Moon (bmoon@scu.edu)
-# Version: 1.0
+# Version: 1.1
 # Copyright: Santa Clara University
 
 use constant TRUE => 1;
 use constant FALSE => 0;
 use Config::General qw(ParseConfig);
 use JSON;
+use Mozilla::CA;
 use POSIX qw(strftime);
 use REST::Client;
-use DATA::Dump qw(dump ddx);
+
 
 #############
 # Main Body #
 #############
 printLicense();
 
-# Initialize variables and set defaults
+# Initialize global variables and set defaults
 my $configFile = "SATdownload.conf";
 my $date = strftime("%Y%m%d", localtime);
-my $fileNum = -1;
+my $fileNum = "";
 my $fileName = "";
 my $writeCounterFile = TRUE;
 
 # Set default config
 my %defaultConfig = (
+  scoredwnldUrlRoot => "https://scoresdownload.collegeboard.org",
   counterFile => "SATdownload.counter",
   downloadConsecutiveFiles => TRUE,
   fileExtension => "txt",
@@ -80,33 +82,28 @@ foreach (@ARGV) {
 # Load Config
 my %config = ParseConfig(-ConfigFile => $configFile, -AutoTrue => TRUE, -MergeDuplicateOptions => TRUE, -DefaultConfig => \%defaultConfig);
 
+# Check if fileNum has been set
 if($fileNum ne "") {
   $writeCounterFile = FALSE;
 }
+# Check if fileName has been set
 if($fileName ne "") {
   $writeCounterFile = FALSE;
   $config{downloadConsecutiveFiles} = FALSE; 
-}
-
-
-# Get current counter
-#if($fileNum < 0) {
-#  $fileNum = readCounterFile($config{counterFile});
-#}
-
-#if(!$fileName) {
-#  $fileName = $config{orgID}."_".$date."_".pad($fileNum,$config{fileNumPadding}).".".$config{fileExtension};
-#}
-
-if(!$fileName) {
+} else {
   $fileName = getNextFileName();
 }
+
+# Boolean to track if download was successful
 my $successfulDownload = FALSE;
 
+# Attempt to download the file.  If successful and downloadConsecutiveFiles is
+# TRUE, continue loop
 do {
   logMsg("Getting download URL for $fileName");
   $successfulDownload = downloadFile($fileName);
   if($successfulDownload && $writeCounterFile) {
+  	# Write counter file
     writeFile($config{counterFile}, $fileNum) or die "Error writing to counter file!";
   }
   ++$fileNum;
@@ -117,79 +114,177 @@ logMsg("Done!");
 #############
 # Functions #
 #############
+
+###############################################################################
+# Use the PAScoresDwnld web service to download a file.  A pre-signed URL will
+# be obtained using the filename, username, and password.  This URL will then
+# be passed to download() to get the file.
+#
+# For additional documentation on the web service function, please see:
+# https://collegereadiness.collegeboard.org/educators/higher-ed/reporting-portal-help#features
+#
+# @param fileName Name of SAT score file to download
+# @return TRUE if download was successful
+#         FALSE if download failed
 sub downloadFile {
-  my ($fileName) = @_;
+  # Verify number of paramters
+  if(scalar(@_) != 1) {
+  	die "downloadFile(): Expected one parameter: fileName";
+  }
+  # Assign local variables
+  my ($fileName) = $_[0];
+  
+  # Create REST::Client and attempt to get the fileURL
   my $client = REST::Client->new();
   $client->addHeader('Content-Type', 'application/json');
   $client->addHeader('Accept', 'application/json');
   $client->POST($config{scoredwnldUrlRoot}.'/pascoredwnld/file?filename='.$fileName, to_json({username => $config{username}, password => $config{password}}));
   
+  # Create JSON object to parse the response
   my $json = JSON->new->allow_nonref;
-  logMsg("Response Code: ".$client->responseCode());
-  if($client->responseCode() == 200) {
-    logMsg("Response Code: ".$client->responseCode());
-    my $responseContent = $json->decode($client->responseContent());
-    logMsg("Response Content: ".$json->pretty->encode($responseContent));
   
+  # Print response code to help with debugging
+  logMsg("Response Code: ".$client->responseCode());
+ 
+  # Check response code to see if the request was successful
+  if($client->responseCode() == 200) {
+  	# Request was successful.  Use the fileUrl to download the file and return
+  	# the result of the download attempt.
+  	my $responseContent = $json->decode($client->responseContent());
+    logMsg("Response Content: ".$json->pretty->encode($responseContent));
     return download($responseContent->{"fileUrl"}, $fileName);
-  } else {
-    return FALSE;
+  } elsif($client->responseCode() == 404) {
+  	# fileName does not exist
+  	my $responseContent = $json->decode($client->responseContent());
+    logMsg("Response Content: ".$responseContent->{"message"});
+  }else {
+  	# Other request error
+  	logMsg("Response content: ".$client->responseContent());
   }
+  return FALSE;
 }
 
+###############################################################################
+# Download and save a file using a pre-signed URL.
+#
+# For additional documentation, please see:
+# https://collegereadiness.collegeboard.org/educators/higher-ed/reporting-portal-help#features
+#
+# @param fileURL - Pre-signed URL or file to download
+# @param fileName - Local path and file name to save file as
+# @return TRUE is download was successful
+#         FALSE is download or saving the file failed
 sub download {
+  # Verify number of paramters
+  if(scalar(@_) != 2) { 
+  	die "download(): Expected two parameters: fileUrl, fileName.";
+  }
+  
+  # Assign local variables
   my ($fileUrl) = $_[0];
   my ($fileName) = $_[1];
-  logMsg("File URL: ".$fileUrl);
+  
+  # Attempt to download the file
   my $client = REST::Client->new();
   $client->GET($fileUrl);
+  
+  # Check response code to see if the request was successful
   if($client->responseCode() == 200) {
+  	# Request was successful.  Attempt to save the file locally and return the
+  	# result of writing the file.
     logMsg("Saving file to $config{localFilePath}$fileName");
     return writeFile($config{localFilePath}.$fileName, $client->responseContent());
   } else {
+  	# Request failed.  Print error information.
     logMsg("Could not download file! Response Code: ".$client->responseCode());
     logMsg("Content: ".$client->responseContent());
   }
   return FALSE;
 }
 
+###############################################################################
+# Generate the name of the next file in the sequence to download. If counter
+# has not been set, then the counter will be read from the counter file.
+#
+# @return File name
 sub getNextFileName {
-  if($fileNum < 0) {
+  # If fileNum has not been set, read from the counter file
+  if($fileNum eq "") {
+  	logMsg("Getting counter from ".$config{counterFile});
     $fileNum = readFile($config{counterFile}) + 1;
   }
 
+  # Return the next file name in the sequence
   return $fileName = $config{orgID}."_".$date."_".pad($fileNum,$config{fileNumPadding}).".".$config{fileExtension};
 }
 
+###############################################################################
+# Read a local file
+#
+# @param fileName - File to read
+# @return Contents of the file as a String
 sub readFile {
+  # Verify numberof paramters
+  if(scalar(@_) != 1) {
+  	die "readFile(): Expected one parameter: fileName";
+  }
+  my ($fileName) = $_[0];
+  
+  # Read file
   chomp(my $text = do {
-    open( my $fh, $_[0] ) or return 0;
+    open( my $fh, $fileName ) or return 0;
     local $/ = undef;
     <$fh>;
   });
+  
+  # Return the contents of the file as a String
   return $text;  
 }
 
+###############################################################################
+# Print a time-stamped log message on the console
+#
+# @param msg Message to print
 sub logMsg {
   my ($msg) = @_;
   my $time = strftime("%Y-%m-%d %H:%M:%S", localtime);
   println($time."\t".$msg);
 }
 
+###############################################################################
+# Pad number with zeroes to get the correct number of digits
+#
+# @param str - String to pad
+# @param len - Number of digits in padded string
+# @return Padded string
 sub pad {
+  # Verify number of paramters
+  if(scalar(@_) != 2) {
+  	die "pad(): Expected two paramters: str, len";
+  }
   my ($str) = $_[0];
   my ($len) = $_[1];
   
+  # Pad str with 0s
   while(length($str) < $len) {
    $str = "0" . $str;
   }
+  
+  # Return padded string
   return $str;
 }
 
+###############################################################################
+# Print a message to the console with a new-line character
+#
+# @param Message to print
 sub println {
  print @_, "\n";
 }
 
+###############################################################################
+# Print help information to the console
+#
 sub printHelp {
   println("Usage: SATdownload.pl [--date=DATE | --filenum=NUM | --filename=FILENAME]\n");
   println("Options:");
@@ -209,6 +304,9 @@ sub printHelp {
   println("   Display this help information.\n");
 }
 
+###############################################################################
+# Print license information to the console
+#
 sub printLicense {
   println("SATdownload.pl  Copyright (C) 2015  Santa Clara University");
   println("This program comes with ABSOLUTELY NO WARRANTY.  This is free software, and you");
@@ -216,11 +314,30 @@ sub printLicense {
   println("please refer to the License section in the header of this file.\n");
 }
 
+###############################################################################
+# Write a local file.  This will clobber the current file with the new file
+# content.
+#
+# @param fileName - File to read
+# @param fileContent - Content to write to the file
+# @return TRUE if file write was successful
+#         FALSE if file write was unsuccessful
 sub writeFile {
+  # Verify number of paramters
+  if(scalar(@_) != 2) {
+  	die "writeFile(): Expected two parameters: fileName, fileContent";
+  }
   my ($fileName) = $_[0];
   my ($fileContent) = $_[1];
-  open (my $fh, '>', $fileName) or die "Could not open file '$fileName' to write: $!";
-  print $fh $fileContent;
-  close $fh;
-  return TRUE;
+  
+  # Write file
+  if(open (my $fh, '>', $fileName)) {
+    print $fh $fileContent;
+    close $fh;
+    return TRUE;
+  } else {
+  	# Open file to write failed
+  	die "Could not open file '$fileName' to write: $!";
+  	return FALSE;
+  }
 }

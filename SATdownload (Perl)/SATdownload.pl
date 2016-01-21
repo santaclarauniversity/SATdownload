@@ -4,7 +4,7 @@ use warnings;
 use 5.012;
 ###############################################################################
 # SATdownload.pl
-# Copyright (C) 2015 Santa Clara University
+# Copyright (C) 2016 Santa Clara University
 #
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -67,12 +67,13 @@ use 5.012;
 #  500 - Internal error
 #
 # Author: Brian Moon (bmoon@scu.edu)
-# Version: 1.1
+# Version: 1.2
 # Copyright: Santa Clara University
 
 use constant TRUE => 1;
 use constant FALSE => 0;
 use Config::General qw(ParseConfig);
+use File::Spec;
 use JSON;
 use Mozilla::CA;
 use POSIX qw(strftime);
@@ -135,10 +136,10 @@ do {
   logMsg("Getting download URL for $fileName");
   $successfulDownload = downloadFile($fileName);
   if($successfulDownload && $writeCounterFile) {
-  	# Write counter file
+    # Write counter file
     if(!writeFile($config{counterFile}, $fileNum)) {
-    	$exit_code = 2;
-    	die "Error writing to counter file!";
+      $exit_code = 2;
+      die "Error writing to counter file!";
     }
   }
   ++$fileNum;
@@ -164,8 +165,8 @@ logMsg("Done!");
 sub downloadFile {
   # Verify number of paramters
   if(scalar(@_) != 1) {
-  	$exit_code = 500;
-  	die "downloadFile(): Expected one parameter: fileName";
+    $exit_code = 500;
+    die "downloadFile(): Expected one parameter: fileName";
   }
   # Assign local variables
   my ($fileName) = $_[0];
@@ -184,18 +185,18 @@ sub downloadFile {
  
   # Check response code to see if the request was successful
   if($client->responseCode() == 200) {
-  	# Request was successful.  Use the fileUrl to download the file and return
-  	# the result of the download attempt.
-  	my $responseContent = $json->decode($client->responseContent());
+    # Request was successful.  Use the fileUrl to download the file and return
+    # the result of the download attempt.
+    my $responseContent = $json->decode($client->responseContent());
     logMsg("Response Content: ".$json->pretty->encode($responseContent));
     return download($responseContent->{"fileUrl"}, $fileName);
   } elsif($client->responseCode() == 404) {
-  	# fileName does not exist
-  	my $responseContent = $json->decode($client->responseContent());
+    # fileName does not exist
+    my $responseContent = $json->decode($client->responseContent());
     logMsg("Response Content: ".$responseContent->{"message"});
   }else {
-  	# Other request error
-  	logMsg("Response content: ".$client->responseContent());
+    # Other request error
+    logMsg("Response content: ".$client->responseContent());
   }
   return FALSE;
 }
@@ -213,8 +214,8 @@ sub downloadFile {
 sub download {
   # Verify number of paramters
   if(scalar(@_) != 2) {
-  	$exit_code = 500;
-  	die "download(): Expected two parameters: fileUrl, fileName.";
+    $exit_code = 500;
+    die "download(): Expected two parameters: fileUrl, fileName.";
   }
   
   # Assign local variables
@@ -227,12 +228,12 @@ sub download {
   
   # Check response code to see if the request was successful
   if($client->responseCode() == 200) {
-  	# Request was successful.  Attempt to save the file locally and return the
-  	# result of writing the file.
+    # Request was successful.  Attempt to save the file locally and return the
+    # result of writing the file.
     logMsg("Saving file to $config{localFilePath}$fileName");
-    return writeFile($config{localFilePath}.$fileName, $client->responseContent());
+    return writeFile(File::Spec->catfile($config{localFilePath}, $fileName), $client->responseContent());
   } else {
-  	# Request failed.  Print error information.
+    # Request failed.  Print error information.
     logMsg("Could not download file! Response Code: ".$client->responseCode());
     logMsg("Content: ".$client->responseContent());
   }
@@ -247,7 +248,7 @@ sub download {
 sub getNextFileName {
   # If fileNum has not been set, read from the counter file
   if($fileNum eq "") {
-  	logMsg("Getting counter from ".$config{counterFile});
+    logMsg("Getting counter from ".$config{counterFile});
     $fileNum = readFile($config{counterFile}) + 1;
   }
 
@@ -263,8 +264,8 @@ sub getNextFileName {
 sub readFile {
   # Verify numberof paramters
   if(scalar(@_) != 1) {
-  	$exit_code = 500;
-  	die "readFile(): Expected one parameter: fileName";
+    $exit_code = 500;
+    die "readFile(): Expected one parameter: fileName";
   }
   my ($fileName) = $_[0];
   
@@ -298,8 +299,8 @@ sub logMsg {
 sub pad {
   # Verify number of paramters
   if(scalar(@_) != 2) {
-  	$exit_code = 500;
-  	die "pad(): Expected two paramters: str, len";
+    $exit_code = 500;
+    die "pad(): Expected two paramters: str, len";
   }
   my ($str) = $_[0];
   my ($len) = $_[1];
@@ -347,7 +348,7 @@ sub printHelp {
 # Print license information to the console
 #
 sub printLicense {
-  println("SATdownload.pl  Copyright (C) 2015  Santa Clara University");
+  println("SATdownload.pl  Copyright (C) 2016  Santa Clara University");
   println("This program comes with ABSOLUTELY NO WARRANTY.  This is free software, and you");
   println("are welcome to redistribute it under certain conditions.  For those conditions,");
   println("please refer to the License section in the header of this file.\n");
@@ -364,25 +365,26 @@ sub printLicense {
 sub writeFile {
   # Verify number of paramters
   if(scalar(@_) != 2) {
-  	$exit_code = 500;
-  	die "writeFile(): Expected two parameters: fileName, fileContent";
+    $exit_code = 500;
+    die "writeFile(): Expected two parameters: fileName, fileContent";
   }
   my ($fileName) = $_[0];
   my ($fileContent) = $_[1];
   
   # Write file
   if(open (my $fh, '>', $fileName)) {
+    binmode($fh);
     print $fh $fileContent;
     close $fh;
     return TRUE;
   } else {
-  	# Open file to write failed
-  	$exit_code = 3;
-  	die "Could not open file '$fileName' to write: $!";
-  	return FALSE;
+    # Open file to write failed
+    $exit_code = 3;
+    die "Could not open file '$fileName' to write: $!";
+    return FALSE;
   }
 }
 
 END {
-	$! = $exit_code;
+  $! = $exit_code;
 }

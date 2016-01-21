@@ -42,6 +42,7 @@ use 5.012;
 # --config=CONFIGFILE
 #   Specify the path and file name of the config file. Default is
 #   SATdownload.conf.
+#
 # --date=DATE
 #   Specify date of file to download.  Default is today's date.
 #   Recommended format is YYYY/MM/DD.

@@ -862,7 +862,7 @@ public class SATdownload {
       InputStream configFileIS = new FileInputStream(fileName);
       config.load(configFileIS);
     } catch (FileNotFoundException e) {
-      log("Count not find config file " + fileName);
+      log("Could not find config file " + fileName);
       System.exit(ExitStatus.MISSING_CONFIG_FILE.getCode());
     } catch (IOException e) {
       log("Error reading config file " + fileName);

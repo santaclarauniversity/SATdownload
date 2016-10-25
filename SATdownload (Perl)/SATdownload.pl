@@ -39,6 +39,9 @@ use 5.012;
 # localFilePath.
 #
 # At run-time, the following options may be set:
+# --all
+#   Download all files currently available.
+#
 # --config=CONFIGFILE
 #   Specify the path and file name of the config file. Default is
 #   SATdownload.conf.
@@ -55,21 +58,42 @@ use 5.012;
 # --filename=FILENAME
 #   Specify the exact file name to download.
 #
+# --fromdate=DATE
+#   Download all files that have been posted since a certain date.  Date should
+#   be in the format yyyy-MM-dd.
+#
+# --fromdatetime=DATETIME
+#   Download all files that have been posted since a specified date and time.
+#   The date and time should be in the format yyyy-MM-dd'T'HH:mm:ss.  For
+#   example: 2016-01-30T23:11:55.  The Time Zone used is specified in the
+#   configuration file (if not set, UTC is assumed).
+#
 # -h | --help
 #   Display this help information.
 #
 # Documenation on the PAScoresDwnld API can be found at
-# https://collegereadiness.collegeboard.org/educators/higher-ed/reporting-portal-help#features
+# https://collegereadiness.collegeboard.org/educators/higher-ed/reporting-portal-help#download-using-a-web-service
 #
 # Exit Codes:
 #  0 - Success
 #  1 - Unknown option
 #  2 - Cannot write file
+#  3 - Error downloading a file
 #  500 - Internal error
 #
 # Author: Brian Moon (bmoon@scu.edu)
-# Version: 1.2
+# Version: 2.0
 # Copyright: Santa Clara University
+#
+# Change Log:
+# Version 2.0
+#   With the addition of the File Directory Listing API from Collegeboard, the
+#   following new parameters have been introduced:
+#     --all
+#     --fromdate
+#     --fromdatetime
+#   These paramters allow the user to download all files that have been posted,
+#   or only those files that have been posted after a specified date and time. 
 
 use constant TRUE => 1;
 use constant FALSE => 0;
@@ -89,9 +113,11 @@ printLicense();
 # Initialize global variables and set defaults
 my $configFile = "SATdownload.conf";
 my $date = strftime("%Y%m%d", localtime);
+my $downloadAll = FALSE;
 my $exit_code = 0;
 my $fileNum = "";
 my $fileName = "";
+my $fromDate = "";
 my $writeCounterFile = TRUE;
 
 # Set default config
@@ -100,15 +126,19 @@ my %defaultConfig = (
   counterFile => "SATdownload.counter",
   downloadConsecutiveFiles => TRUE,
   fileExtension => "txt",
-  fileNumPadding => 6
+  fileNumPadding => 6,
+  GMTOffset => "+0000"
 );
 
 # Check options
 foreach (@ARGV) {
-  if(/^--config=/) { ($configFile = $_) =~ s/--config=//; }
+  if(/^--all/) { $downloadAll = TRUE; }
+  elsif(/^--config=/) { ($configFile = $_) =~ s/--config=//; }
   elsif(/^--date=/) { ($date = $_) =~ s/--date=|\/|\\//g; }
   elsif(/^--filenum=/) { ($fileNum = $_) =~ s/--filenum=//; }
   elsif(/^--filename=/) { ($fileName = $_) =~ s/--filename=//;  }
+  elsif(/^--fromdate=/) { ($fromDate = $_) =~ s/--fromdate=//; $fromDate = $fromDate."T00:00:00" }
+  elsif(/^--fromdatetime=/) { ($fromDate = $_) =~ s/--fromdatetime=//;  }
   elsif(/^(-h|--help)$/) { printHelp(); exit 0;}
   else { println("Unknown option: $_"); printHelp(); exit 1;}  
 }
@@ -116,10 +146,55 @@ foreach (@ARGV) {
 # Load Config
 my %config = ParseConfig(-ConfigFile => $configFile, -AutoTrue => TRUE, -MergeDuplicateOptions => TRUE, -DefaultConfig => \%defaultConfig);
 
+# Check if the user has selected to download all files in the directory
+if($downloadAll) {
+  # Get listing of available files
+  my @fileListing = getFileListing();
+  # Check to see if there are any files available
+  if(!@fileListing) {
+    logMsg("No files to download.");
+    exit 0;
+  }
+  # Iterate through list of files and download
+  for my $file (@fileListing) {
+    println("File name: ".$file->{fileName});
+    if(!downloadFile($file->{fileName})) {
+      $exit_code = 3;
+      die "Failed to download $file->{fileName}";
+    } 
+  }
+  logMsg("All downloads are complete.");
+  exit 0;
+}
+
+# Check if fromDate has been set
+if($fromDate ne "") {
+  # If date was entered as YYYY/MM/DD convert it to YYYY-MM-DD
+  $fromDate =~ s/\//-/g;
+  # Get listing of available files from the specified date
+  my @fileListing = getFileListing($fromDate);
+  # Check to see if there are any files available
+  if(!@fileListing) {
+    logMsg("No files to download.");
+    exit 0;
+  }
+  # Iterate through list of files and download
+  for my $file (@fileListing) {
+    println("File name: ".$file->{fileName});
+    if(!downloadFile($file->{fileName})) {
+      $exit_code = 3;
+      die "Failed to download $file->{fileName}";
+    } 
+  }
+  logMsg("All downloads are complete.");
+  exit 0;
+}
+
 # Check if fileNum has been set
 if($fileNum ne "") {
   $writeCounterFile = FALSE;
 }
+
 # Check if fileName has been set
 if($fileName ne "") {
   $writeCounterFile = FALSE;
@@ -147,6 +222,7 @@ do {
   getNextFileName();
 } while($config{downloadConsecutiveFiles} && $successfulDownload);
 logMsg("Done!");
+
 
 #############
 # Functions #
@@ -258,12 +334,69 @@ sub getNextFileName {
 }
 
 ###############################################################################
+# Generate a list of all files available for download.
+#
+# @param fromDate - Optional parameter to specify a date to list all files
+#                   posted after.  The date format should be
+#                   yyyy-MM-dd'T'HH:mm:ss.  For example: 2016-01-30T23:11:55.
+#                   The Time Zone used is specified in the configuration file
+#                   (if not set, UTC is assumed).
+# @return Array of files.  For details on the file information included, please
+#         refer to the "File Directory Listing API" available at
+#         https://collegereadiness.collegeboard.org/educators/higher-ed/reporting-portal-help#download-using-a-web-service
+sub getFileListing {
+  my($fromDate) = 0;
+  # Verify number of paramters
+  if(scalar(@_) == 1) {
+     $fromDate = $_[0].$config{GMTOffset};
+  } elsif(scalar(@_) > 1) {
+    $exit_code = 500;
+    die "getFileListing(): Too many parameters provided.";
+  }
+  
+  # Create REST::Client
+  my $client = REST::Client->new();
+  $client->addHeader('Content-Type', 'application/json');
+  $client->addHeader('Accept', 'application/json');
+  
+  # Attempt to get file listing
+  if($fromDate) {
+    $client->POST($config{scoredwnldUrlRoot}.'/pascoredwnld/files/list?fromDate='.$fromDate, to_json({username => $config{username}, password => $config{password}}));
+  } else {
+    $client->POST($config{scoredwnldUrlRoot}.'/pascoredwnld/files/list', to_json({username => $config{username}, password => $config{password}}));
+  }
+  
+  # Create JSON object to parse the response
+  my $json = JSON->new->allow_nonref;
+  
+  # Print response code to help with debugging
+  logMsg("Response Code: ".$client->responseCode());
+ 
+  # Check response code to see if the request was successful
+  if($client->responseCode() == 200) {
+    # Request was successful.  Return the list of files.
+    my $responseContent = $json->decode($client->responseContent());
+    logMsg("Response Content: ".$json->pretty->encode($responseContent));
+    # Return null if there are no files to download
+    if(!$responseContent->{files}) {
+      return;
+    }
+    # Return array of files available for download
+    return @{$responseContent->{files}};
+  } else {
+    # Other request error
+    logMsg("Response content: ".$client->responseContent());
+  }
+  return;
+}
+
+###############################################################################
 # Read a local file
 #
 # @param fileName - File to read
 # @return Contents of the file as a String
 sub readFile {
-  # Verify numberof paramters
+  # Verify number of paramters
   if(scalar(@_) != 1) {
     $exit_code = 500;
     die "readFile(): Expected one parameter: fileName";
@@ -327,11 +460,13 @@ sub println {
 # Print help information to the console
 #
 sub printHelp {
-  println("Usage: SATdownload.pl [--date=DATE | --filenum=NUM | --filename=FILENAME]\n");
+  println("Usage: SATdownload.pl [--all | --config=config.file | --date=DATE | --filenum=NUM | --filename=FILENAME | --fromdate=DATE | --fromdatetime=DATETIME]\n");
   println("Options:");
+  println(" --all");
+  println("   Download all files currently available.\n");
   println(" --config=CONFIGFILE");
   println("   Specify the path and file name of the config file. Default is"); 
-  println("   SATdownload.conf.");
+  println("   SATdownload.conf.\n");
   println(" --date=DATE");
   println("   Specify date of file to download.  Default is today's date.");
   println("   Recommended format is YYYY/MM/DD.\n");
@@ -341,6 +476,14 @@ sub printHelp {
   println("   file.\n");
   println(" --filename=FILENAME");
   println("   Specify the exact file name to download.\n");
+  println(" --fromdate=DATE");
+  println("   Download all files that have been posted since a certain date.  Date should");
+  println("   be in the format yyyy-MM-dd.\n");
+  println(" --fromdatetime=DATETIME");
+  println("   Download all files that have been posted since a specified date and time.");
+  println("   The date and time should be in the format yyyy-MM-dd'T'HH:mm:ss.  For");
+  println("   example: 2016-01-30T23:11:55.  The Time Zone used is specified in the");
+  println("   configuration file (if not set, UTC is assumed).\n");  
   println(" -h | --help");
   println("   Display this help information.\n");
 }

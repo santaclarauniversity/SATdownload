@@ -172,6 +172,7 @@ if($fromDate ne "") {
   # If date was entered as YYYY/MM/DD convert it to YYYY-MM-DD
   $fromDate =~ s/\//-/g;
   # Get listing of available files from the specified date
+  logMsg("Getting list of files posted since $fromDate$config{GMTOffset} to download.");
   my @fileListing = getFileListing($fromDate);
   # Check to see if there are any files available
   if(!@fileListing) {
@@ -180,7 +181,7 @@ if($fromDate ne "") {
   }
   # Iterate through list of files and download
   for my $file (@fileListing) {
-    println("File name: ".$file->{fileName});
+    logMsg("Downloading file $file->{fileName}");
     if(!downloadFile($file->{fileName})) {
       $exit_code = 3;
       die "Failed to download $file->{fileName}";

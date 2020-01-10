@@ -176,7 +176,7 @@ function Get-FileListing {
   Print license information to the console
 #>
 function Write-License {
-  Write-Output "ACTdownload.ps1  Copyright (C) 2017  Santa Clara University"
+  Write-Output "SATdownload.ps1  Copyright (C) 2017  Santa Clara University"
   Write-Output "This program comes with ABSOLUTELY NO WARRANTY.  This is free software, and you"
   Write-Output "are welcome to redistribute it under certain conditions.  For those conditions,"
   Write-Output "please refer to the License section in the header of this file."
